@@ -36,7 +36,7 @@ func recoverFunc(rw http.ResponseWriter, r *http.Request) {
 	if err := recover(); err != nil {
 		logger := log.FromContext(middlewares.GetLoggerCtx(r.Context(), middlewareName, typeName))
 		if !shouldLogPanic(err) {
-			logger.Debugf("Request has been aborted [%s - %s]: %v", r.RemoteAddr, r.URL, err)
+			logger.Errorf("Request has been aborted [%s - %s]: %v", r.RemoteAddr, r.URL, err)
 			return
 		}
 
