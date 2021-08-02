@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"runtime"
+	"time"
 
 	"github.com/traefik/traefik/v2/pkg/log"
 	"github.com/traefik/traefik/v2/pkg/middlewares"
@@ -27,20 +28,37 @@ func New(ctx context.Context, next http.Handler) (http.Handler, error) {
 	}, nil
 }
 
+type key string
+
+const startKey key = "start"
+
 func (re *recovery) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	defer recoverFunc(rw, req)
-	re.next.ServeHTTP(rw, req)
+	reqWithStart := req.WithContext(context.WithValue(req.Context(), startKey, time.Now()))
+	defer recoverFunc(rw, reqWithStart)
+	re.next.ServeHTTP(rw, reqWithStart)
 }
 
 func recoverFunc(rw http.ResponseWriter, r *http.Request) {
 	if err := recover(); err != nil {
+		var duration time.Duration
+		if start, ok := r.Context().Value(startKey).(time.Time); ok {
+			duration = time.Now().Sub(start)
+		}
 		logger := log.FromContext(middlewares.GetLoggerCtx(r.Context(), middlewareName, typeName))
 		if !shouldLogPanic(err) {
-			logger.Errorf("Request has been aborted [%s - %s]: %v", r.RemoteAddr, r.URL, err)
+			if duration > 0 {
+				logger.Errorf("Request has been aborted [%s - %s] after %s: %v", r.RemoteAddr, r.URL, duration, err)
+			} else {
+				logger.Errorf("Request has been aborted [%s - %s]: %v", r.RemoteAddr, r.URL, err)
+			}
 			return
 		}
 
-		logger.Errorf("Recovered from panic in HTTP handler [%s - %s]: %+v", r.RemoteAddr, r.URL, err)
+		if duration > 0 {
+			logger.Errorf("Recovered from panic in HTTP handler [%s - %s] after %s: %+v", r.RemoteAddr, r.URL, duration, err)
+		} else {
+			logger.Errorf("Recovered from panic in HTTP handler [%s - %s]: %+v", r.RemoteAddr, r.URL, err)
+		}
 		const size = 64 << 10
 		buf := make([]byte, size)
 		buf = buf[:runtime.Stack(buf, false)]
