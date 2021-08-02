@@ -33,32 +33,23 @@ type key string
 const startKey key = "start"
 
 func (re *recovery) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	reqWithStart := req.WithContext(context.WithValue(req.Context(), startKey, time.Now()))
+	reqWithStart := req.WithContext(context.WithValue(req.Context(), startKey, time.Now().UTC()))
 	defer recoverFunc(rw, reqWithStart)
 	re.next.ServeHTTP(rw, reqWithStart)
 }
 
 func recoverFunc(rw http.ResponseWriter, r *http.Request) {
 	if err := recover(); err != nil {
-		var duration time.Duration
-		if start, ok := r.Context().Value(startKey).(time.Time); ok {
-			duration = time.Now().Sub(start)
-		}
 		logger := log.FromContext(middlewares.GetLoggerCtx(r.Context(), middlewareName, typeName))
+		if start, ok := r.Context().Value(startKey).(time.Time); ok {
+			logger = logger.WithField("Duration", time.Now().UTC().Sub(start))
+		}
 		if !shouldLogPanic(err) {
-			if duration > 0 {
-				logger.Errorf("Request has been aborted [%s - %s] after %s: %v", r.RemoteAddr, r.URL, duration, err)
-			} else {
-				logger.Errorf("Request has been aborted [%s - %s]: %v", r.RemoteAddr, r.URL, err)
-			}
+			logger.Errorf("Request has been aborted [%s - %s]: %v", r.RemoteAddr, r.URL, err)
 			return
 		}
 
-		if duration > 0 {
-			logger.Errorf("Recovered from panic in HTTP handler [%s - %s] after %s: %+v", r.RemoteAddr, r.URL, duration, err)
-		} else {
-			logger.Errorf("Recovered from panic in HTTP handler [%s - %s]: %+v", r.RemoteAddr, r.URL, err)
-		}
+		logger.Errorf("Recovered from panic in HTTP handler [%s - %s]: %+v", r.RemoteAddr, r.URL, err)
 		const size = 64 << 10
 		buf := make([]byte, size)
 		buf = buf[:runtime.Stack(buf, false)]
